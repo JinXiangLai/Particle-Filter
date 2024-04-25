@@ -7,6 +7,7 @@ from math import pi, cos, sin, sqrt
 import matplotlib.pyplot as plt
 from scipy.stats import multivariate_normal
 import copy
+import time
 
 # Right-Front-Up Coordinate，wheel speed direction along with Y axis
 WHEEL_BASE = 0.3   # m
@@ -129,6 +130,10 @@ class ParticleManager:
            self.weights_[i] =  new_weight
     
     def NormlizeWeight(self) -> None:
+        diff = abs(np.sum(self.weights_) - 1.0)
+        if diff > 1e-20 and diff < 1e-19:
+            return
+            
         for i in range(self.num_):
             self.weights_[i] = self.particles_[i].weight_
         self.weights_ = np.array(self.weights_) / np.sum(self.weights_)
@@ -149,7 +154,24 @@ class ParticleManager:
         
         Neff = 1 / sum_square_weight
         return Neff < self.max_resample_threshold_
-    
+
+    def RouletteSelect(self):
+        self.NormlizeWeight()
+        sum_weights = [self.weights_[0]]
+        for i in range(1, self.num_):
+            sum_weights.append(sum_weights[i-1] + self.weights_[i])
+
+        new_p = []
+        for i in range(self.num_):
+            sum_weight = np.random.rand()
+            for j in range(self.num_):
+                if sum_weight < sum_weights[j]:
+                    p = copy.deepcopy(self.particles_[j])
+                    new_p.append(p)
+                    break
+        
+        self.SetNewParticleSet(new_p)
+        
     def UpdateParticleWeightsAndCurrentPose(self, pdv_list):
         # Normlize weights
         pdv_list = np.array(pdv_list) / np.sum(pdv_list)
@@ -157,6 +179,7 @@ class ParticleManager:
             self.particles_[i].weight_ *= pdv_list[i]
         self.NormlizeWeight()
         self.UpdateCurrentMeanPose()
+
 
 def main(sample_num, particle_num):
     vr_list = []
@@ -167,6 +190,7 @@ def main(sample_num, particle_num):
     init_weight = 1.0 / particle_num
     manager = ParticleManager(particle_num)
     
+    start_t = time.time()
     # initialize particle set
     for i in range(particle_num):
         p = Particle(init_pose, init_weight)
@@ -203,13 +227,10 @@ def main(sample_num, particle_num):
         # resample
         if manager.NeedResample():
             print("resample at step %d"%(i))
-            indices = np.random.choice(range(len(manager.weights_)), size=particle_num, p=manager.weights_)
-            new_p = []
-            for id in indices:
-                p = copy.deepcopy(manager.particles_[id])
-                new_p.append(p)
-            
-            manager.SetNewParticleSet(new_p)
+            manager.RouletteSelect()
+    end_t = time.time()
+    print("Filter spend time %.6f s"%(end_t - start_t))
+    
     
     px_est = []
     py_est = []
